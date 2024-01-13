@@ -14,7 +14,7 @@ import (
 
 var (
 	NormalRunTime  = 30
-	LongRunTime    = 70
+	LongRunTime    = 700
 	TaskNum        = 20
 	ConcurrenceNum = 5
 	FailError      = errors.New("fail task")
@@ -45,6 +45,12 @@ func buildSuccessTasks() []*Task[TaskIface] {
 func buildFailTasks() []*Task[TaskIface] {
 	return buildTasks(func(i int) *Task[TaskIface] {
 		return NewTask[TaskIface](&FailTask{}, strconv.Itoa(i), i)
+	})
+}
+
+func buildFalseTasks() []*Task[TaskIface] {
+	return buildTasks(func(i int) *Task[TaskIface] {
+		return NewTask[TaskIface](&FalseTask{}, strconv.Itoa(i), i)
 	})
 }
 
@@ -168,7 +174,7 @@ func (this *SchedulerTest) TestExecuteByOrder_ShouldReturnErrorIfTaskError() {
 		this.Assert().Nil(err)
 		wait.Wait()
 		this.Assert().NotNil(wait.ResultErr())
-		this.Assert().False(this.scheduler.IsSubmitted(strconv.Itoa(i)))
+		this.Assert().False(this.scheduler.IsSubmitted(batchId))
 		// retry after fail, should success
 		this.runByOrder(i)
 	})
@@ -219,33 +225,27 @@ func (this *SchedulerTest) TestExecuteByOrder_ShouldReturnTokenTimeOutErrorIfWai
 	})
 }
 
-func (this *SchedulerTest) TestExecuteByOrder_ConcurrenceNumShouldBeLimited() {
+func (this *SchedulerTest) TestExecuteByOrder_ShouldStopBehindTasksIfPreOneError() {
 	this.concurrence(func(i int) {
-		f := func(i int, capacity int) int64 {
-			batchId := strconv.Itoa(i)
-			scheduler, _ := NewScheduler(capacity, &LimiterParams{
-				Ctx:       context.Background(),
-				TokenRate: 100,
-				Capacity:  100,
-			})
-			starTime := time.Now()
-			// firstly, let concurrency goruntine to occupy capacity
-			_, errOne := scheduler.ExecuteByConcurrency(strconv.Itoa(i+1), buildSuccessTasks())
-			this.Assert().Nil(errOne)
-			// secondly, verify block
-			waiter, err := scheduler.ExecuteByOrder(batchId, buildSuccessTasks())
-			this.Assert().Nil(err)
-			waiter.Wait()
-			sub := time.Now().Sub(starTime).Milliseconds()
-			this.Assert().Less(int64(TaskNum*NormalRunTime), sub)
-			return sub
-		}
-		// capacity similar to infinity
-		firstCost := f(i, 1000)
-		// capacity is limited
-		secondCost := f(i, 1)
-		this.Assert().Less(firstCost, secondCost)
-		fmt.Printf("TestExecuteByOrder_ConcurrenceNumShouldBeLimited first cost:%+v second cost:%+v \n", firstCost, secondCost)
+		batchId := strconv.Itoa(i)
+		startTime := time.Now()
+		waiter, err := this.scheduler.ExecuteByOrder(batchId, buildFailTasks())
+		this.Assert().Nil(err)
+		waiter.Wait()
+		this.Assert().NotNil(waiter.ResultErr())
+		this.Assert().Less(time.Now().Sub(startTime).Milliseconds(), int64(TaskNum*NormalRunTime))
+	})
+}
+
+func (this *SchedulerTest) TestExecuteByOrder_ShouldStopBehindTasksIfPreOneFalse() {
+	this.concurrence(func(i int) {
+		batchId := strconv.Itoa(i)
+		startTime := time.Now()
+		waiter, err := this.scheduler.ExecuteByOrder(batchId, buildFalseTasks())
+		this.Assert().Nil(err)
+		waiter.Wait()
+		this.Assert().Nil(waiter.ResultErr())
+		this.Assert().Less(time.Now().Sub(startTime).Milliseconds(), int64(TaskNum*NormalRunTime))
 	})
 }
 
@@ -275,18 +275,14 @@ func (this *SchedulerTest) TestExecuteByConcurrency_TaskShouldRunByConcurrence()
 	})
 }
 
-func (this *SchedulerTest) TestExecuteByConcurrency_ShouldStopBehindTasksIfPreOneFail() {
+func (this *SchedulerTest) TestExecuteByConcurrency_ShouldStopBehindTasksIfPreOneFalse() {
 	this.concurrence(func(i int) {
 		batchId := strconv.Itoa(i)
-		tasks := make(Tasks, 0)
-		for i := 0; i < 50; i++ {
-			tasks = append(tasks, buildMixTasks()...)
-		}
 		startTime := time.Now()
-		waiter, err := this.scheduler.ExecuteByConcurrency(batchId, tasks)
+		waiter, err := this.scheduler.ExecuteByConcurrency(batchId, buildFalseTasks())
 		this.Assert().Nil(err)
 		waiter.Wait()
-		this.Assert().Equal(FailError, waiter.ResultErr())
+		this.Assert().Nil(waiter.ResultErr())
 		this.Assert().Less(time.Now().Sub(startTime).Milliseconds(), int64(TaskNum*NormalRunTime))
 	})
 }
@@ -320,7 +316,7 @@ func (this *SchedulerTest) TestExecuteByConcurrency_ShouldReturnTokenTimeOutErro
 	})
 }
 
-func (this *SchedulerTest) TestExecuteByConcurrency_ConcurrenceNumShouldBeLimited() {
+func (this *SchedulerTest) TestExecuteByConcurrency_ShouldReturnErrorIfBlock() {
 	this.concurrence(func(i int) {
 		batchId := strconv.Itoa(i)
 		scheduler, _ := NewScheduler(1, &LimiterParams{
@@ -328,12 +324,29 @@ func (this *SchedulerTest) TestExecuteByConcurrency_ConcurrenceNumShouldBeLimite
 			TokenRate: 100,
 			Capacity:  100,
 		})
-		starTime := time.Now()
 		waiter, err := scheduler.ExecuteByConcurrency(batchId, buildSuccessTasks())
 		this.Assert().Nil(err)
 		waiter.Wait()
-		this.Assert().Less(int64(TaskNum*NormalRunTime), time.Now().Sub(starTime).Milliseconds()) // if serial cost less than total cost,it illustrates that concurrence num be limited
+		this.Assert().Equal(BlockingError, waiter.ResultErr())
 	})
+}
+
+func (this *SchedulerTest) TestExecuteByOrder_ShouldReturnErrorIfBlock() {
+	scheduler, _ := NewScheduler(TaskNum, &LimiterParams{
+		Ctx:       context.Background(),
+		TokenRate: 100,
+		Capacity:  100,
+	})
+	// firstly, let concurrency goruntine to occupy capacity
+	waiterOne, errOne := scheduler.ExecuteByConcurrency(strconv.Itoa(1), buildLongTimeTasks())
+	this.Assert().Nil(errOne)
+	// secondly, should return err
+	waiterTwo, err := scheduler.ExecuteByOrder(strconv.Itoa(2), buildSuccessTasks())
+	this.Assert().Nil(err)
+	waiterTwo.Wait()
+	waiterOne.Wait()
+	this.Assert().True(waiterOne.ResultErr() != nil || waiterTwo.ResultErr() != nil)
+	fmt.Printf("one error:%+v two error:%+v \n", waiterOne.ResultErr(), waiterTwo.ResultErr())
 }
 
 func (this *SchedulerTest) TestExecuteByConcurrency_TaskShouldBeControlledByTokenRate() {
@@ -440,6 +453,47 @@ func (this *SchedulerTest) Test_ShouldBeAsync() {
 	this.Assert().Nil(waiter2.ResultErr())
 }
 
+func (this *SchedulerTest) Test_ShouldCallTaskStopFunction() {
+	this.shouldCallSpecifyFunction(Stop, "1")
+}
+
+func (this *SchedulerTest) Test_ShouldCallTaskResumeFunction() {
+	this.shouldCallSpecifyFunction(Resume, "1")
+}
+
+func (this *SchedulerTest) Test_ShouldCallTaskCancelFunction() {
+	this.shouldCallSpecifyFunction(Cancel, "1")
+}
+
+func (this *SchedulerTest) Test_ShouldCallTaskPauseFunction() {
+	this.shouldCallSpecifyFunction(Pause, "1")
+}
+
+func (this *SchedulerTest) Test_ShouldCallTaskDeleteFunction() {
+	this.shouldCallSpecifyFunction(Delete, "1")
+}
+
+func (this *SchedulerTest) shouldCallSpecifyFunction(f func(group *TaskGroup, taskId string) (bool, error), id string) {
+	this.concurrence(func(i int) {
+		batchId := strconv.Itoa(i)
+		_, err := this.scheduler.ExecuteByConcurrency(batchId, buildLongTimeTasks())
+		this.Assert().Nil(err)
+		ok, err := this.scheduler.Do(f, batchId, id)
+		this.Assert().NotNil(err)
+		this.Assert().False(ok)
+	})
+}
+
+func (this *SchedulerTest) Test_ShouldReturnErrorIfTaskNotFind() {
+	i := 1
+	batchId := strconv.Itoa(i)
+	_, err := this.scheduler.ExecuteByConcurrency(batchId, buildLongTimeTasks())
+	this.Assert().Nil(err)
+	ok, err := this.scheduler.Do(Stop, batchId, "10000000000000")
+	this.Assert().Equal(TaskNotFindError, err)
+	this.Assert().False(ok)
+}
+
 func Test_SchedulerTest(t *testing.T) {
 	suite.Run(t, new(SchedulerTest))
 }
@@ -447,47 +501,183 @@ func Test_SchedulerTest(t *testing.T) {
 type SuccessTask struct {
 }
 
-func (this *SuccessTask) GetBizLogic() func() error {
+func (this *SuccessTask) GetBizLogic() func() (bool, error) {
 	return this.success
 }
 
-func (this *SuccessTask) success() error {
+func (this *SuccessTask) success() (bool, error) {
 	time.Sleep(time.Duration(NormalRunTime) * time.Millisecond)
-	return nil
+	return true, nil
+}
+
+func (this *SuccessTask) Stop() (bool, error) {
+	fmt.Println("success task Stop")
+	return true, nil
+}
+
+func (this *SuccessTask) Resume() (bool, error) {
+	fmt.Println("success task resume")
+	return true, nil
+}
+
+func (this *SuccessTask) Cancel() (bool, error) {
+	fmt.Println("success task cancel")
+	return true, nil
+}
+
+func (this *SuccessTask) Pause() (bool, error) {
+	fmt.Println("success task pause")
+	return false, FailError
+}
+
+func (this *SuccessTask) Delete() (bool, error) {
+	fmt.Println("success task delete")
+	return false, FailError
 }
 
 type FailTask struct {
 }
 
-func (this *FailTask) GetBizLogic() func() error {
+func (this *FailTask) GetBizLogic() func() (bool, error) {
 	return this.fail
 }
 
-func (this *FailTask) fail() error {
+func (this *FailTask) fail() (bool, error) {
 	time.Sleep(time.Duration(NormalRunTime) * time.Millisecond)
-	return FailError
+	return false, FailError
+}
+
+func (this *FailTask) Stop() (bool, error) {
+	fmt.Println("fail task Stop")
+	return false, FailError
+}
+
+func (this *FailTask) Resume() (bool, error) {
+	fmt.Println("fail task resume")
+	return false, FailError
+}
+
+func (this *FailTask) Cancel() (bool, error) {
+	fmt.Println("fail task cancel")
+	return false, FailError
+}
+
+func (this *FailTask) Pause() (bool, error) {
+	fmt.Println("fail task pause")
+	return false, FailError
+}
+
+func (this *FailTask) Delete() (bool, error) {
+	fmt.Println("fail task delete")
+	return false, FailError
 }
 
 type LongTimeTask struct {
 }
 
-func (this *LongTimeTask) GetBizLogic() func() error {
+func (this *LongTimeTask) GetBizLogic() func() (bool, error) {
 	return this.longTime
 }
 
-func (this *LongTimeTask) longTime() error {
+func (this *LongTimeTask) longTime() (bool, error) {
 	time.Sleep(time.Duration(LongRunTime) * time.Millisecond)
-	return nil
+	return true, nil
+}
+
+func (this *LongTimeTask) Stop() (bool, error) {
+	fmt.Println("long time task Stop")
+	return false, FailError
+}
+
+func (this *LongTimeTask) Resume() (bool, error) {
+	fmt.Println("long time task resume")
+	return false, FailError
+}
+
+func (this *LongTimeTask) Cancel() (bool, error) {
+	fmt.Println("long time task cancel")
+	return false, FailError
+}
+
+func (this *LongTimeTask) Pause() (bool, error) {
+	fmt.Println("panic task pause")
+	return false, FailError
+}
+
+func (this *LongTimeTask) Delete() (bool, error) {
+	fmt.Println("panic task delete")
+	return false, FailError
 }
 
 type PanicTask struct {
 }
 
-func (this *PanicTask) GetBizLogic() func() error {
+func (this *PanicTask) GetBizLogic() func() (bool, error) {
 	return this.panic
 }
 
-func (this *PanicTask) panic() error {
-	panic("task panic")
-	return nil
+func (this *PanicTask) panic() (bool, error) {
+	panic("task notOk")
+	return false, nil
+}
+
+func (this *PanicTask) Stop() (bool, error) {
+	fmt.Println("panic task Stop")
+	return false, FailError
+}
+
+func (this *PanicTask) Resume() (bool, error) {
+	fmt.Println("panic task resume")
+	return false, FailError
+}
+
+func (this *PanicTask) Cancel() (bool, error) {
+	fmt.Println("panic task cancel")
+	return false, FailError
+}
+
+func (this *PanicTask) Pause() (bool, error) {
+	fmt.Println("panic task pause")
+	return false, FailError
+}
+
+func (this *PanicTask) Delete() (bool, error) {
+	fmt.Println("panic task delete")
+	return false, FailError
+}
+
+type FalseTask struct {
+}
+
+func (this *FalseTask) GetBizLogic() func() (bool, error) {
+	return this.notOk
+}
+
+func (this *FalseTask) notOk() (bool, error) {
+	return false, nil
+}
+
+func (this *FalseTask) Stop() (bool, error) {
+	fmt.Println("false task Stop")
+	return false, FailError
+}
+
+func (this *FalseTask) Resume() (bool, error) {
+	fmt.Println("false task resume")
+	return false, FailError
+}
+
+func (this *FalseTask) Cancel() (bool, error) {
+	fmt.Println("false task cancel")
+	return false, FailError
+}
+
+func (this *FalseTask) Pause() (bool, error) {
+	fmt.Println("false task pause")
+	return false, FailError
+}
+
+func (this *FalseTask) Delete() (bool, error) {
+	fmt.Println("false task delete")
+	return false, FailError
 }

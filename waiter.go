@@ -31,10 +31,6 @@ func (this *Waiter) appendOrder(order int) {
 	this.orders = append(this.orders, order)
 }
 
-func (this *Waiter) ordersLen() int {
-	return len(this.orders)
-}
-
 func (this *Waiter) ResultErr() error {
 	if this.err.Load() == nil {
 		return nil

@@ -12,6 +12,7 @@ type Scheduler struct {
 	mu          sync.Mutex
 	doMutex     sync.Mutex
 	capacity    chan struct{}
+	occupy      int32
 }
 
 func NewScheduler(capacity int, limiterParam *LimiterParams) (*Scheduler, error) {
@@ -79,8 +80,13 @@ func (this *Scheduler) getToken(n int) error {
 	return nil
 }
 
-func (this *Scheduler) fillCapacity() {
-	this.capacity <- struct{}{}
+func (this *Scheduler) occupyCapacity() error {
+	select {
+	case this.capacity <- struct{}{}:
+		return nil
+	default:
+		return BlockingError
+	}
 }
 
 func (this *Scheduler) releaseCapacity() {
@@ -105,4 +111,35 @@ func (this *Scheduler) ExecuteByConcurrency(batchId string, tasks Tasks) (*Waite
 	this.tasks.Store(batchId, taskGroup)
 	taskGroup.runByConcurrency()
 	return taskGroup.getWaiter(), nil
+}
+
+func (this *Scheduler) Do(do func(group *TaskGroup, taskId string) (bool, error), batchId, taskId string) (bool, error) {
+	this.doMutex.Lock()
+	defer this.doMutex.Unlock()
+	value, ok := this.tasks.Load(batchId)
+	if ok {
+		group := value.(*TaskGroup)
+		return do(group, taskId)
+	}
+	return false, TaskNotFindError
+}
+
+func Stop(group *TaskGroup, taskId string) (bool, error) {
+	return group.do(taskId, stop)
+}
+
+func Resume(group *TaskGroup, taskId string) (bool, error) {
+	return group.do(taskId, resume)
+}
+
+func Cancel(group *TaskGroup, taskId string) (bool, error) {
+	return group.do(taskId, cancel)
+}
+
+func Pause(group *TaskGroup, taskId string) (bool, error) {
+	return group.do(taskId, pause)
+}
+
+func Delete(group *TaskGroup, taskId string) (bool, error) {
+	return group.do(taskId, delete)
 }

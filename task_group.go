@@ -11,7 +11,6 @@ type TaskGroup struct {
 	scheduler *Scheduler
 	tasks     Tasks
 	waiter    *Waiter
-	mu        sync.Mutex
 }
 
 func NewTaskGroup(id string, tasks Tasks, scheduler *Scheduler) *TaskGroup {
@@ -33,24 +32,31 @@ func (this *TaskGroup) sort() {
 func (this *TaskGroup) runByOrder() {
 	go func() {
 		this.sort()
+		var Err atomic.Value
 		for _, task := range this.tasks {
-			this.scheduler.fillCapacity()
+			if Err.Load() != nil {
+				break
+			}
+			err := this.scheduler.occupyCapacity()
+			if err != nil {
+				Err.Store(err)
+				break
+			}
 			if err := this.scheduler.getToken(1); err != nil {
 				this.scheduler.releaseCapacity()
-				this.waiter.addErr(TokenTimeoutError)
-				this.waiter.close()
-				return
+				Err.Store(TokenTimeoutError)
+				break
 			}
 			task.setTaskGroup(this)
-			if err := task.run(); err != nil {
-				this.waiter.addErr(err)
-				this.waiter.close()
-				this.scheduler.releaseCapacity()
-				this.scheduler.delete(this.id)
-				return
+			ok, err := task.run()
+			if err != nil {
+				Err.Store(err)
+			} else if !ok {
+				Err.Store(TerminationError)
 			}
 			this.scheduler.releaseCapacity()
 		}
+		this.over(Err)
 	}()
 }
 
@@ -64,7 +70,10 @@ func (this *TaskGroup) runByConcurrency() {
 			if Err.Load() != nil {
 				break
 			}
-			this.scheduler.fillCapacity()
+			if err := this.scheduler.occupyCapacity(); err != nil {
+				Err.Store(BlockingError)
+				break
+			}
 			if err := this.scheduler.getToken(1); err != nil {
 				Err.Store(TokenTimeoutError)
 				break
@@ -76,18 +85,25 @@ func (this *TaskGroup) runByConcurrency() {
 					this.scheduler.releaseCapacity()
 				}()
 				task.setTaskGroup(this)
-				if err := task.run(); err != nil {
+				ok, err := task.run()
+				if err != nil {
 					Err.Store(err)
-					this.scheduler.delete(this.id)
+				} else if !ok {
+					Err.Store(TerminationError)
 				}
 			}(task)
 		}
 		wg.Wait()
-		if Err.Load() != nil {
-			this.waiter.addErr(Err.Load().(error))
-			this.waiter.close()
-		}
+		this.over(Err)
 	}()
+}
+
+func (this *TaskGroup) over(Err atomic.Value) {
+	if Err.Load() != nil && Err.Load().(error) != TerminationError {
+		this.waiter.addErr(Err.Load().(error))
+	}
+	this.waiter.close()
+	this.scheduler.delete(this.id)
 }
 
 func (this *TaskGroup) getWaiter() *Waiter {
@@ -96,8 +112,33 @@ func (this *TaskGroup) getWaiter() *Waiter {
 
 func (this *TaskGroup) recordOrder(order int) {
 	this.waiter.appendOrder(order)
-	if this.tasks.Len() == this.waiter.ordersLen() {
-		this.scheduler.delete(this.id)
-		this.waiter.close()
+}
+
+func (this *TaskGroup) do(id string, do func(task *Task[TaskIface]) (bool, error)) (bool, error) {
+	for _, task := range this.tasks {
+		if task.id == id {
+			return do(task)
+		}
 	}
+	return false, TaskNotFindError
+}
+
+func stop(task *Task[TaskIface]) (bool, error) {
+	return task.stop()
+}
+
+func resume(task *Task[TaskIface]) (bool, error) {
+	return task.resume()
+}
+
+func cancel(task *Task[TaskIface]) (bool, error) {
+	return task.cancel()
+}
+
+func pause(task *Task[TaskIface]) (bool, error) {
+	return task.pause()
+}
+
+func delete(task *Task[TaskIface]) (bool, error) {
+	return task.delete()
 }

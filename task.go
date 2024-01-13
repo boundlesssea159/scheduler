@@ -6,7 +6,12 @@ import (
 )
 
 type TaskIface interface {
-	GetBizLogic() func() error
+	GetBizLogic() func() (bool, error)
+	Stop() (bool, error)
+	Resume() (bool, error)
+	Cancel() (bool, error)
+	Pause() (bool, error)
+	Delete() (bool, error)
 }
 
 type Task[T TaskIface] struct {
@@ -42,15 +47,37 @@ func (this *Task[T]) setTaskGroup(taskGroup *TaskGroup) {
 	this.taskGroup = taskGroup
 }
 
-func (this *Task[T]) run() (err error) {
+func (this *Task[T]) run() (ok bool, err error) {
 	defer func() {
 		if rv := recover(); rv != nil {
-			err = errors.New(fmt.Sprintf("task panic: %+v", rv))
+			err = errors.New(fmt.Sprintf("task notOk: %+v", rv))
+			ok = false
 		}
 	}()
-	if err = this.customer.GetBizLogic()(); err != nil {
-		return err
+	ok, err = this.customer.GetBizLogic()()
+	if err != nil || !ok {
+		return false, err
 	}
 	this.taskGroup.recordOrder(this.order)
-	return err
+	return ok, err
+}
+
+func (this *Task[T]) stop() (bool, error) {
+	return this.customer.Stop()
+}
+
+func (this *Task[T]) resume() (bool, error) {
+	return this.customer.Resume()
+}
+
+func (this *Task[T]) cancel() (bool, error) {
+	return this.customer.Cancel()
+}
+
+func (this *Task[T]) pause() (bool, error) {
+	return this.customer.Pause()
+}
+
+func (this *Task[T]) delete() (bool, error) {
+	return this.customer.Delete()
 }
