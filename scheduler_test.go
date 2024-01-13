@@ -485,11 +485,14 @@ func (this *SchedulerTest) shouldCallSpecifyFunction(f func(group *TaskGroup, ta
 }
 
 func (this *SchedulerTest) Test_ShouldReturnErrorIfTaskNotFind() {
-	i := 1
-	batchId := strconv.Itoa(i)
-	_, err := this.scheduler.ExecuteByConcurrency(batchId, buildLongTimeTasks())
+	_, err := this.scheduler.ExecuteByConcurrency("1", buildLongTimeTasks())
 	this.Assert().Nil(err)
-	ok, err := this.scheduler.Do(Stop, batchId, "10000000000000")
+
+	ok, err := this.scheduler.Do(Stop, "2", "1")
+	this.Assert().Equal(TaskNotFindError, err)
+	this.Assert().False(ok)
+
+	ok, err = this.scheduler.Do(Stop, "1", "10000000000000")
 	this.Assert().Equal(TaskNotFindError, err)
 	this.Assert().False(ok)
 }
