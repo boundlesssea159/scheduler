@@ -19,8 +19,8 @@ func NewTaskGroup(id string, tasks Tasks, scheduler *Scheduler) *TaskGroup {
 		scheduler: scheduler,
 		tasks:     tasks,
 		waiter: &Waiter{
-			ok:     make(chan struct{}),
-			orders: make([]int, 0, len(tasks)),
+			ok:       make(chan struct{}),
+			orderIds: make([]string, 0, len(tasks)),
 		},
 	}
 }
@@ -110,8 +110,8 @@ func (this *TaskGroup) getWaiter() *Waiter {
 	return this.waiter
 }
 
-func (this *TaskGroup) recordOrder(order int) {
-	this.waiter.appendOrder(order)
+func (this *TaskGroup) recordId(id string) {
+	this.waiter.appendId(id)
 }
 
 func (this *TaskGroup) do(id string, do func(task *Task[TaskIface]) (bool, error)) (bool, error) {

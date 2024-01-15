@@ -85,6 +85,14 @@ func buildOrders(n int) []int {
 	return result
 }
 
+func buildIds(n int) []string {
+	result := make([]string, 0, n)
+	for i := 1; i <= n; i++ {
+		result = append(result, strconv.Itoa(i))
+	}
+	return result
+}
+
 func (this *SchedulerTest) concurrence(f func(i int)) {
 	wg := sync.WaitGroup{}
 	for i := 1; i <= ConcurrenceNum; i++ {
@@ -163,7 +171,7 @@ func (this *SchedulerTest) runByOrder(i int) {
 	this.Assert().Nil(err)
 	this.Assert().NotNil(wait)
 	wait.Wait()
-	this.Assert().Equal(buildOrders(len(successTasks)), wait.GetOrders())
+	this.Assert().Equal(buildIds(len(successTasks)), wait.GetTaskIds())
 	this.Assert().False(this.scheduler.IsSubmitted(batchId))
 }
 
@@ -256,7 +264,7 @@ func (this *SchedulerTest) TestExecuteByConcurrency_ShouldBeAsync() {
 	this.Assert().Nil(err)
 	this.Assert().Less(time.Now().Sub(startTime).Milliseconds(), int64(LongRunTime))
 	waiter.Wait()
-	this.Assert().Equal(len(waiter.GetOrders()), TaskNum)
+	this.Assert().Equal(len(waiter.GetTaskIds()), TaskNum)
 	this.Assert().Nil(waiter.ResultErr())
 }
 
@@ -270,7 +278,6 @@ func (this *SchedulerTest) TestExecuteByConcurrency_TaskShouldRunByConcurrence()
 		waiter, err := this.scheduler.ExecuteByConcurrency(batchId, buildSuccessTasks())
 		this.Assert().Nil(err)
 		waiter.Wait()
-		fmt.Println(len(waiter.GetOrders()), waiter.GetOrders())
 		this.Assert().False(this.scheduler.IsSubmitted(batchId))
 	})
 }
@@ -429,9 +436,9 @@ func (this *SchedulerTest) Test_ShouldRunMuchBatchTasks() {
 		waiter, err := scheduler.ExecuteByConcurrency(strconv.Itoa(5), buildSuccessTasks())
 		this.Assert().Nil(err)
 		waiter.Wait()
-		this.Assert().NotEmpty(waiter.GetOrders())
+		this.Assert().NotEmpty(waiter.GetTaskIds())
 		this.Assert().Nil(waiter.ResultErr())
-		fmt.Println(waiter.GetOrders())
+		fmt.Println(waiter.GetTaskIds())
 	}()
 	wg.Wait()
 }
@@ -447,9 +454,9 @@ func (this *SchedulerTest) Test_ShouldBeAsync() {
 	this.Assert().Less(time.Now().Sub(startTime).Milliseconds(), int64(LongRunTime))
 	waiter1.Wait()
 	waiter2.Wait()
-	this.Assert().Equal(len(waiter1.GetOrders()), TaskNum)
+	this.Assert().Equal(len(waiter1.GetTaskIds()), TaskNum)
 	this.Assert().Nil(waiter1.ResultErr())
-	this.Assert().Equal(len(waiter2.GetOrders()), TaskNum)
+	this.Assert().Equal(len(waiter2.GetTaskIds()), TaskNum)
 	this.Assert().Nil(waiter2.ResultErr())
 }
 

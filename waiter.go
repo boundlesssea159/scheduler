@@ -6,11 +6,11 @@ import (
 )
 
 type Waiter struct {
-	ok     chan struct{}
-	closed int32
-	orders []int
-	err    atomic.Value
-	mu     sync.RWMutex
+	ok       chan struct{}
+	closed   int32
+	orderIds []string
+	err      atomic.Value
+	mu       sync.RWMutex
 }
 
 func (this *Waiter) Wait() {
@@ -21,16 +21,16 @@ func (this *Waiter) close() {
 	close(this.ok)
 }
 
-func (this *Waiter) GetOrders() []int {
+func (this *Waiter) GetTaskIds() []string {
 	this.mu.RLock()
 	defer this.mu.RUnlock()
-	return this.orders
+	return this.orderIds
 }
 
-func (this *Waiter) appendOrder(order int) {
+func (this *Waiter) appendId(id string) {
 	this.mu.Lock()
 	defer this.mu.Unlock()
-	this.orders = append(this.orders, order)
+	this.orderIds = append(this.orderIds, id)
 }
 
 func (this *Waiter) ResultErr() error {
