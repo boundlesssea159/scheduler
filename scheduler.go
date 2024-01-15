@@ -94,22 +94,24 @@ func (this *Scheduler) releaseCapacity() {
 }
 
 func (this *Scheduler) ExecuteByOrder(batchId string, tasks Tasks) (*Waiter, error) {
-	if err := this.check(batchId, tasks); err != nil {
-		return nil, err
-	}
-	taskGroup := NewTaskGroup(batchId, tasks, this)
-	this.tasks.Store(batchId, taskGroup)
-	taskGroup.runByOrder()
-	return taskGroup.getWaiter(), nil
+	return this.execute(func(taskGroup *TaskGroup) func() {
+		return taskGroup.runByOrder
+	}, batchId, tasks)
 }
 
 func (this *Scheduler) ExecuteByConcurrency(batchId string, tasks Tasks) (*Waiter, error) {
+	return this.execute(func(taskGroup *TaskGroup) func() {
+		return taskGroup.runByConcurrency
+	}, batchId, tasks)
+}
+
+func (this *Scheduler) execute(executeFunc func(taskGroup *TaskGroup) func(), batchId string, tasks Tasks) (*Waiter, error) {
 	if err := this.check(batchId, tasks); err != nil {
 		return nil, err
 	}
 	taskGroup := NewTaskGroup(batchId, tasks, this)
 	this.tasks.Store(batchId, taskGroup)
-	taskGroup.runByConcurrency()
+	executeFunc(taskGroup)()
 	return taskGroup.getWaiter(), nil
 }
 
