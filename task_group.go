@@ -102,8 +102,8 @@ func (this *TaskGroup) over(Err atomic.Value) {
 	if Err.Load() != nil && Err.Load().(error) != TerminationError {
 		this.waiter.addErr(Err.Load().(error))
 	}
-	this.waiter.close()
 	this.scheduler.delete(this.id)
+	this.waiter.close()
 }
 
 func (this *TaskGroup) getWaiter() *Waiter {
