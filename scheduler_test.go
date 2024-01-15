@@ -77,14 +77,6 @@ func buildTasks(f func(i int) *Task[TaskIface]) []*Task[TaskIface] {
 	return tasks
 }
 
-func buildOrders(n int) []int {
-	result := make([]int, 0, n)
-	for i := 1; i <= n; i++ {
-		result = append(result, i)
-	}
-	return result
-}
-
 func buildIds(n int) []string {
 	result := make([]string, 0, n)
 	for i := 1; i <= n; i++ {
@@ -373,12 +365,12 @@ func (this *SchedulerTest) TestExecuteByConcurrency_TaskShouldBeControlledByToke
 
 func (this *SchedulerTest) Test_ShouldNotCrashIfTaskOccurPanic() {
 	this.concurrence(func(i int) {
-		waiter1, err1 := this.scheduler.ExecuteByOrder(strconv.Itoa(i), []*Task[TaskIface]{NewTask[TaskIface](&PanicTask{}, "", i)})
+		waiter1, err1 := this.scheduler.ExecuteByOrder(strconv.Itoa(i), []*Task[TaskIface]{NewTask[TaskIface](&PanicTask{}, strconv.Itoa(i), i)})
 		this.Assert().Nil(err1)
 		waiter1.Wait()
 		this.Assert().NotNil(waiter1.ResultErr())
 
-		waiter2, err2 := this.scheduler.ExecuteByConcurrency(strconv.Itoa(i), []*Task[TaskIface]{NewTask[TaskIface](&PanicTask{}, "", i)})
+		waiter2, err2 := this.scheduler.ExecuteByConcurrency(strconv.Itoa(i), []*Task[TaskIface]{NewTask[TaskIface](&PanicTask{}, strconv.Itoa(i), i)})
 		this.Assert().Nil(err2)
 		waiter2.Wait()
 		this.Assert().NotNil(waiter2.ResultErr())
