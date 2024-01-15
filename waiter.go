@@ -10,7 +10,7 @@ type Waiter struct {
 	closed int32
 	orders []int
 	err    atomic.Value
-	mu     sync.Mutex
+	mu     sync.RWMutex
 }
 
 func (this *Waiter) Wait() {
@@ -22,6 +22,8 @@ func (this *Waiter) close() {
 }
 
 func (this *Waiter) GetOrders() []int {
+	this.mu.RLock()
+	defer this.mu.RUnlock()
 	return this.orders
 }
 
