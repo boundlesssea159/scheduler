@@ -19,8 +19,8 @@ func NewTaskGroup(id string, tasks Tasks, scheduler *Scheduler) *TaskGroup {
 		scheduler: scheduler,
 		tasks:     tasks,
 		waiter: &Waiter{
-			ok:       make(chan struct{}),
-			orderIds: make([]string, 0, len(tasks)),
+			ok:      make(chan struct{}),
+			taskIds: make([]string, 0, len(tasks)),
 		},
 	}
 }
