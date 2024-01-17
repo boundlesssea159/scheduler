@@ -3,6 +3,7 @@ package scheduler
 import (
 	"errors"
 	"fmt"
+	"sync"
 )
 
 type TaskIface interface {
@@ -19,6 +20,7 @@ type Task[T TaskIface] struct {
 	customer  T
 	taskGroup *TaskGroup
 	order     int
+	mu        sync.Mutex
 }
 
 func NewTask[T TaskIface](customer T, id string, order int) *Task[T] {
@@ -60,6 +62,12 @@ func (this *Task[T]) run() (ok bool, err error) {
 	}
 	this.taskGroup.recordId(this.id)
 	return ok, err
+}
+
+func (this *Task[T]) do(do func() (bool, error)) (bool, error) {
+	this.mu.Lock()
+	defer this.mu.Unlock()
+	return do()
 }
 
 func (this *Task[T]) stop() (bool, error) {

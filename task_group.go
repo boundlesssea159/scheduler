@@ -124,21 +124,21 @@ func (this *TaskGroup) do(id string, do func(task *Task[TaskIface]) (bool, error
 }
 
 func stop(task *Task[TaskIface]) (bool, error) {
-	return task.stop()
+	return task.do(task.stop)
 }
 
 func resume(task *Task[TaskIface]) (bool, error) {
-	return task.resume()
+	return task.do(task.resume)
 }
 
 func cancel(task *Task[TaskIface]) (bool, error) {
-	return task.cancel()
+	return task.do(task.cancel)
 }
 
 func pause(task *Task[TaskIface]) (bool, error) {
-	return task.pause()
+	return task.do(task.pause)
 }
 
 func delete(task *Task[TaskIface]) (bool, error) {
-	return task.delete()
+	return task.do(task.delete)
 }

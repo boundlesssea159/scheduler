@@ -14,7 +14,7 @@ import (
 
 var (
 	NormalRunTime  = 30
-	LongRunTime    = 700
+	LongRunTime    = 1000
 	TaskNum        = 20
 	ConcurrenceNum = 5
 	FailError      = errors.New("fail task")
@@ -56,7 +56,7 @@ func buildFalseTasks() []*Task[TaskIface] {
 
 func buildLongTimeTasks() []*Task[TaskIface] {
 	return buildTasks(func(i int) *Task[TaskIface] {
-		return NewTask[TaskIface](&LongTimeTask{}, strconv.Itoa(i), i)
+		return NewTask[TaskIface](&LongTimeTask{properties: make(map[string]string)}, strconv.Itoa(i), i)
 	})
 }
 
@@ -483,6 +483,35 @@ func (this *SchedulerTest) shouldCallSpecifyFunction(f func(group *TaskGroup, ta
 	})
 }
 
+func (this *SchedulerTest) Test_ShouldNotPanicIfCallMultiActionAtTheSameTime() {
+	batchId := "1"
+	_, err := this.scheduler.ExecuteByConcurrency(batchId, buildLongTimeTasks())
+	this.Assert().Nil(err)
+	type action func(group *TaskGroup, taskId string) (bool, error)
+	actions := []action{
+		Stop,
+		Resume,
+		Cancel,
+		Pause,
+		Delete,
+	}
+	for i := 0; i < 10; i++ {
+		actions = append(actions, actions...)
+	}
+	wg := sync.WaitGroup{}
+	wg.Add(len(actions))
+	for _, action := range actions {
+		action := action
+		go func() {
+			defer wg.Done()
+			this.scheduler.Do(action, batchId, "1")
+		}()
+	}
+	wg.Wait()
+}
+
+// do func should recover panic
+
 func (this *SchedulerTest) Test_ShouldReturnErrorIfTaskNotFind() {
 	_, err := this.scheduler.ExecuteByConcurrency("1", buildLongTimeTasks())
 	this.Assert().Nil(err)
@@ -575,6 +604,7 @@ func (this *FailTask) Delete() (bool, error) {
 }
 
 type LongTimeTask struct {
+	properties map[string]string
 }
 
 func (this *LongTimeTask) GetBizLogic() func() (bool, error) {
@@ -588,26 +618,31 @@ func (this *LongTimeTask) longTime() (bool, error) {
 
 func (this *LongTimeTask) Stop() (bool, error) {
 	fmt.Println("long time task Stop")
+	this.properties["property"] = "stop"
 	return false, FailError
 }
 
 func (this *LongTimeTask) Resume() (bool, error) {
 	fmt.Println("long time task resume")
+	this.properties["property"] = "resume"
 	return false, FailError
 }
 
 func (this *LongTimeTask) Cancel() (bool, error) {
 	fmt.Println("long time task cancel")
+	this.properties["property"] = "cancel"
 	return false, FailError
 }
 
 func (this *LongTimeTask) Pause() (bool, error) {
-	fmt.Println("panic task pause")
+	fmt.Println("long task pause")
+	this.properties["property"] = "pause"
 	return false, FailError
 }
 
 func (this *LongTimeTask) Delete() (bool, error) {
-	fmt.Println("panic task delete")
+	fmt.Println("long task delete")
+	this.properties["property"] = "delete"
 	return false, FailError
 }
 

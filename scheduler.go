@@ -10,7 +10,6 @@ type Scheduler struct {
 	tasks       sync.Map
 	rateLimiter *RateLimiter
 	mu          sync.Mutex
-	doMutex     sync.Mutex
 	capacity    chan struct{}
 	occupy      int32
 }
@@ -32,7 +31,6 @@ func NewScheduler(capacity int, limiterParam *LimiterParams) (*Scheduler, error)
 		tasks:       sync.Map{},
 		rateLimiter: rateLimiter,
 		mu:          sync.Mutex{},
-		doMutex:     sync.Mutex{},
 		capacity:    make(chan struct{}, capacity),
 	}, nil
 }
@@ -116,8 +114,6 @@ func (this *Scheduler) execute(executeFunc func(taskGroup *TaskGroup) func(), ba
 }
 
 func (this *Scheduler) Do(do func(group *TaskGroup, taskId string) (bool, error), batchId, taskId string) (bool, error) {
-	this.doMutex.Lock()
-	defer this.doMutex.Unlock()
 	value, ok := this.tasks.Load(batchId)
 	if ok {
 		group := value.(*TaskGroup)
