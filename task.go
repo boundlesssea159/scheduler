@@ -60,7 +60,7 @@ func (this *Task[T]) run() (ok bool, err error) {
 	if err != nil || !ok {
 		return false, err
 	}
-	this.taskGroup.recordId(this.id)
+	this.taskGroup.recordOrder(this.order)
 	return ok, err
 }
 

@@ -2,7 +2,6 @@ package scheduler
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"github.com/stretchr/testify/suite"
 	_ "runtime/pprof"
@@ -12,28 +11,17 @@ import (
 	"time"
 )
 
-var (
-	NormalRunTime  = 30
-	LongRunTime    = 1000
-	TaskNum        = 20
-	ConcurrenceNum = 5
-	FailError      = errors.New("fail task")
-)
+func Test_SchedulerTest(t *testing.T) {
+	suite.Run(t, new(SchedulerTest))
+}
 
 type SchedulerTest struct {
 	suite.Suite
 	scheduler *Scheduler
 }
 
-func (this *SchedulerTest) SetupTest() {
-}
-
 func (this *SchedulerTest) BeforeTest(suiteName, testName string) {
 	this.scheduler, _ = NewScheduler(100, nil)
-}
-
-func (this *SchedulerTest) AfterTest(suiteName, testName string) {
-	this.scheduler = nil
 }
 
 func buildSuccessTasks() []*Task[TaskIface] {
@@ -50,13 +38,13 @@ func buildFailTasks() []*Task[TaskIface] {
 
 func buildFalseTasks() []*Task[TaskIface] {
 	return buildTasks(func(i int) *Task[TaskIface] {
-		return NewTask[TaskIface](&FalseTask{}, strconv.Itoa(i), i)
+		return NewTask[TaskIface](&FailWithNilErrorTask{}, strconv.Itoa(i), i)
 	})
 }
 
 func buildLongTimeTasks() []*Task[TaskIface] {
 	return buildTasks(func(i int) *Task[TaskIface] {
-		return NewTask[TaskIface](&LongTimeTask{properties: make(map[string]string)}, strconv.Itoa(i), i)
+		return NewTask[TaskIface](&LongTimeTask{make(map[string]string)}, strconv.Itoa(i), i)
 	})
 }
 
@@ -77,15 +65,15 @@ func buildTasks(f func(i int) *Task[TaskIface]) []*Task[TaskIface] {
 	return tasks
 }
 
-func buildIds(n int) []string {
-	result := make([]string, 0, n)
+func buildOrders(n int) []int {
+	result := make([]int, 0, n)
 	for i := 1; i <= n; i++ {
-		result = append(result, strconv.Itoa(i))
+		result = append(result, i)
 	}
 	return result
 }
 
-func (this *SchedulerTest) concurrence(f func(i int)) {
+func concurrence(f func(i int)) {
 	wg := sync.WaitGroup{}
 	for i := 1; i <= ConcurrenceNum; i++ {
 		wg.Add(1)
@@ -95,6 +83,19 @@ func (this *SchedulerTest) concurrence(f func(i int)) {
 		}(i)
 	}
 	wg.Wait()
+}
+
+func (this *SchedulerTest) Test_ShouldReturnErrorIfExecuteParamEmpty() {
+	concurrence(func(i int) {
+		_, err := this.scheduler.ExecuteByOrder("", buildSuccessTasks())
+		this.Assert().Equal(InvalidParamError, err)
+		_, err = this.scheduler.ExecuteByOrder("1", nil)
+		this.Assert().Equal(InvalidParamError, err)
+		_, err = this.scheduler.ExecuteByConcurrency("", buildSuccessTasks())
+		this.Assert().Equal(InvalidParamError, err)
+		_, err = this.scheduler.ExecuteByConcurrency("1", nil)
+		this.Assert().Equal(InvalidParamError, err)
+	})
 }
 
 func (this *SchedulerTest) Test_ShouldReturnErrorIfSchedulerParamsInvalid() {
@@ -151,7 +152,7 @@ func (this *SchedulerTest) TaskShouldNotBeDuplicated(fc func(batchId string, tas
 }
 
 func (this *SchedulerTest) TestExecuteByOrder_TaskShouldRunByOrder() {
-	this.concurrence(func(i int) {
+	concurrence(func(i int) {
 		this.runByOrder(i)
 	})
 }
@@ -163,12 +164,12 @@ func (this *SchedulerTest) runByOrder(i int) {
 	this.Assert().Nil(err)
 	this.Assert().NotNil(wait)
 	wait.Wait()
-	this.Assert().Equal(buildIds(len(successTasks)), wait.GetTaskIds())
+	this.Assert().Equal(buildOrders(len(successTasks)), wait.GetOrders())
 	this.Assert().False(this.scheduler.IsSubmitted(batchId))
 }
 
 func (this *SchedulerTest) TestExecuteByOrder_ShouldReturnErrorIfTaskError() {
-	this.concurrence(func(i int) {
+	concurrence(func(i int) {
 		batchId := strconv.Itoa(i)
 		wait, err := this.scheduler.ExecuteByOrder(batchId, buildFailTasks())
 		this.Assert().Nil(err)
@@ -181,7 +182,7 @@ func (this *SchedulerTest) TestExecuteByOrder_ShouldReturnErrorIfTaskError() {
 }
 
 func (this *SchedulerTest) TestExecuteByOrder_TaskShouldBeControlledByTokenRate() {
-	this.concurrence(func(i int) {
+	concurrence(func(i int) {
 		// firstly, test fast rate
 		firstCost := this.apiCost(i, 100, 100, func(scheduler *Scheduler, i int, tasks Tasks) (*Waiter, error) {
 			return scheduler.ExecuteByOrder(strconv.Itoa(i), tasks)
@@ -192,6 +193,21 @@ func (this *SchedulerTest) TestExecuteByOrder_TaskShouldBeControlledByTokenRate(
 		}, buildSuccessTasks())
 		this.Assert().Less(firstCost, secondCost)
 		fmt.Printf("TestExecuteByOrder_TaskShouldBeControlledByTokenRate first cost:%+v , second cost:%+v \n", firstCost, secondCost)
+	})
+}
+
+func (this *SchedulerTest) TestExecuteByConcurrency_TaskShouldBeControlledByTokenRate() {
+	concurrence(func(i int) {
+		// firstly, test fast rate
+		firstCost := this.apiCost(i, 100, 100, func(scheduler *Scheduler, i int, tasks Tasks) (*Waiter, error) {
+			return scheduler.ExecuteByConcurrency(strconv.Itoa(i), tasks)
+		}, buildSuccessTasks())
+		// secondly, test slow rate
+		secondCost := this.apiCost(i, 100, 5, func(scheduler *Scheduler, i int, tasks Tasks) (*Waiter, error) {
+			return scheduler.ExecuteByConcurrency(strconv.Itoa(i), tasks)
+		}, buildSuccessTasks())
+		this.Assert().Less(firstCost, secondCost)
+		fmt.Printf("TestExecuteByConcurrency_TaskShouldBeControlledByTokenRate first cost:%+v , second cost:%+v \n", firstCost, secondCost)
 	})
 }
 
@@ -209,7 +225,7 @@ func (this *SchedulerTest) apiCost(i, capacity int, rate float64, f func(schedul
 }
 
 func (this *SchedulerTest) TestExecuteByOrder_ShouldReturnTokenTimeOutErrorIfWaitTimeOut() {
-	this.concurrence(func(i int) {
+	concurrence(func(i int) {
 		batchId := strconv.Itoa(i)
 		ctx, _ := context.WithTimeout(context.Background(), 50*time.Millisecond)
 		scheduler, _ := NewScheduler(100, &LimiterParams{
@@ -225,8 +241,8 @@ func (this *SchedulerTest) TestExecuteByOrder_ShouldReturnTokenTimeOutErrorIfWai
 	})
 }
 
-func (this *SchedulerTest) TestExecuteByOrder_ShouldStopBehindTasksIfPreOneError() {
-	this.concurrence(func(i int) {
+func (this *SchedulerTest) TestExecuteByOrder_ShouldStopIfPreOneError() {
+	concurrence(func(i int) {
 		batchId := strconv.Itoa(i)
 		startTime := time.Now()
 		waiter, err := this.scheduler.ExecuteByOrder(batchId, buildFailTasks())
@@ -237,8 +253,8 @@ func (this *SchedulerTest) TestExecuteByOrder_ShouldStopBehindTasksIfPreOneError
 	})
 }
 
-func (this *SchedulerTest) TestExecuteByOrder_ShouldStopBehindTasksIfPreOneFalse() {
-	this.concurrence(func(i int) {
+func (this *SchedulerTest) TestExecuteByOrder_ShouldStopIfPreOneFalse() {
+	concurrence(func(i int) {
 		batchId := strconv.Itoa(i)
 		startTime := time.Now()
 		waiter, err := this.scheduler.ExecuteByOrder(batchId, buildFalseTasks())
@@ -256,7 +272,7 @@ func (this *SchedulerTest) TestExecuteByConcurrency_ShouldBeAsync() {
 	this.Assert().Nil(err)
 	this.Assert().Less(time.Now().Sub(startTime).Milliseconds(), int64(LongRunTime))
 	waiter.Wait()
-	this.Assert().Equal(len(waiter.GetTaskIds()), TaskNum)
+	this.Assert().Equal(len(waiter.GetOrders()), TaskNum)
 	this.Assert().Nil(waiter.ResultErr())
 }
 
@@ -265,17 +281,18 @@ func (this *SchedulerTest) TestExecuteByConcurrency_TaskShouldNotBeDuplicated() 
 }
 
 func (this *SchedulerTest) TestExecuteByConcurrency_TaskShouldRunByConcurrence() {
-	this.concurrence(func(i int) {
+	concurrence(func(i int) {
 		batchId := strconv.Itoa(i)
 		waiter, err := this.scheduler.ExecuteByConcurrency(batchId, buildSuccessTasks())
 		this.Assert().Nil(err)
 		waiter.Wait()
+		fmt.Println(len(waiter.GetOrders()), waiter.GetOrders())
 		this.Assert().False(this.scheduler.IsSubmitted(batchId))
 	})
 }
 
 func (this *SchedulerTest) TestExecuteByConcurrency_ShouldStopBehindTasksIfPreOneFalse() {
-	this.concurrence(func(i int) {
+	concurrence(func(i int) {
 		batchId := strconv.Itoa(i)
 		startTime := time.Now()
 		waiter, err := this.scheduler.ExecuteByConcurrency(batchId, buildFalseTasks())
@@ -286,21 +303,8 @@ func (this *SchedulerTest) TestExecuteByConcurrency_ShouldStopBehindTasksIfPreOn
 	})
 }
 
-func (this *SchedulerTest) Test_ShouldReturnErrorIfParamEmpty() {
-	this.concurrence(func(i int) {
-		_, err := this.scheduler.ExecuteByOrder("", buildSuccessTasks())
-		this.Assert().Equal(InvalidParamError, err)
-		_, err = this.scheduler.ExecuteByOrder("1", nil)
-		this.Assert().Equal(InvalidParamError, err)
-		_, err = this.scheduler.ExecuteByConcurrency("", buildSuccessTasks())
-		this.Assert().Equal(InvalidParamError, err)
-		_, err = this.scheduler.ExecuteByConcurrency("1", nil)
-		this.Assert().Equal(InvalidParamError, err)
-	})
-}
-
 func (this *SchedulerTest) TestExecuteByConcurrency_ShouldReturnTokenTimeOutErrorIfWaitTimeOut() {
-	this.concurrence(func(i int) {
+	concurrence(func(i int) {
 		batchId := strconv.Itoa(i)
 		ctx, _ := context.WithTimeout(context.Background(), 50*time.Millisecond)
 		scheduler, _ := NewScheduler(100, &LimiterParams{
@@ -316,31 +320,24 @@ func (this *SchedulerTest) TestExecuteByConcurrency_ShouldReturnTokenTimeOutErro
 }
 
 func (this *SchedulerTest) TestExecuteByConcurrency_ShouldReturnErrorIfBlock() {
-	this.concurrence(func(i int) {
-		batchId := strconv.Itoa(i)
-		scheduler, _ := NewScheduler(1, &LimiterParams{
-			Ctx:       context.Background(),
-			TokenRate: 100,
-			Capacity:  100,
-		})
-		waiter, err := scheduler.ExecuteByConcurrency(batchId, buildSuccessTasks())
-		this.Assert().Nil(err)
-		waiter.Wait()
-		this.Assert().Equal(BlockingError, waiter.ResultErr())
-	})
-}
-
-func (this *SchedulerTest) TestExecuteByOrder_ShouldReturnErrorIfBlock() {
-	scheduler, _ := NewScheduler(TaskNum, &LimiterParams{
+	scheduler, _ := NewScheduler(1, &LimiterParams{
 		Ctx:       context.Background(),
 		TokenRate: 100,
 		Capacity:  100,
 	})
+	waiter, err := scheduler.ExecuteByConcurrency("1", buildSuccessTasks())
+	this.Assert().Nil(err)
+	waiter.Wait()
+	this.Assert().Equal(BlockingError, waiter.ResultErr())
+}
+
+func (this *SchedulerTest) TestExecuteByOrder_ShouldReturnErrorIfBlock() {
+	scheduler, _ := NewScheduler(TaskNum, nil)
 	// firstly, let concurrency goruntine to occupy capacity
-	waiterOne, errOne := scheduler.ExecuteByConcurrency(strconv.Itoa(1), buildLongTimeTasks())
+	waiterOne, errOne := scheduler.ExecuteByConcurrency("1", buildLongTimeTasks())
 	this.Assert().Nil(errOne)
 	// secondly, should return err
-	waiterTwo, err := scheduler.ExecuteByOrder(strconv.Itoa(2), buildSuccessTasks())
+	waiterTwo, err := scheduler.ExecuteByOrder("2", buildSuccessTasks())
 	this.Assert().Nil(err)
 	waiterTwo.Wait()
 	waiterOne.Wait()
@@ -348,155 +345,119 @@ func (this *SchedulerTest) TestExecuteByOrder_ShouldReturnErrorIfBlock() {
 	fmt.Printf("one error:%+v two error:%+v \n", waiterOne.ResultErr(), waiterTwo.ResultErr())
 }
 
-func (this *SchedulerTest) TestExecuteByConcurrency_TaskShouldBeControlledByTokenRate() {
-	this.concurrence(func(i int) {
-		// firstly, test fast rate
-		firstCost := this.apiCost(i, 100, 100, func(scheduler *Scheduler, i int, tasks Tasks) (*Waiter, error) {
-			return scheduler.ExecuteByConcurrency(strconv.Itoa(i), tasks)
-		}, buildSuccessTasks())
-		// secondly, test slow rate
-		secondCost := this.apiCost(i, 100, 5, func(scheduler *Scheduler, i int, tasks Tasks) (*Waiter, error) {
-			return scheduler.ExecuteByConcurrency(strconv.Itoa(i), tasks)
-		}, buildSuccessTasks())
-		this.Assert().Less(firstCost, secondCost)
-		fmt.Printf("TestExecuteByConcurrency_TaskShouldBeControlledByTokenRate first cost:%+v , second cost:%+v \n", firstCost, secondCost)
-	})
-}
-
 func (this *SchedulerTest) Test_ShouldNotCrashIfTaskOccurPanic() {
-	this.concurrence(func(i int) {
-		waiter1, err1 := this.scheduler.ExecuteByOrder(strconv.Itoa(i), []*Task[TaskIface]{NewTask[TaskIface](&PanicTask{}, strconv.Itoa(i), i)})
-		this.Assert().Nil(err1)
-		waiter1.Wait()
-		this.Assert().NotNil(waiter1.ResultErr())
+	waiter1, err1 := this.scheduler.ExecuteByOrder("1", []*Task[TaskIface]{NewTask[TaskIface](&PanicTask{}, "", 1)})
+	this.Assert().Nil(err1)
+	waiter1.Wait()
+	this.Assert().NotNil(waiter1.ResultErr())
 
-		waiter2, err2 := this.scheduler.ExecuteByConcurrency(strconv.Itoa(i), []*Task[TaskIface]{NewTask[TaskIface](&PanicTask{}, strconv.Itoa(i), i)})
-		this.Assert().Nil(err2)
-		waiter2.Wait()
-		this.Assert().NotNil(waiter2.ResultErr())
-	})
+	waiter2, err2 := this.scheduler.ExecuteByConcurrency("1", []*Task[TaskIface]{NewTask[TaskIface](&PanicTask{}, "", 1)})
+	this.Assert().Nil(err2)
+	waiter2.Wait()
+	this.Assert().NotNil(waiter2.ResultErr())
 }
 
 func (this *SchedulerTest) Test_ShouldRunMuchBatchTasks() {
 	scheduler, _ := NewScheduler(100000, nil)
-
 	wg := sync.WaitGroup{}
-	// success
-	wg.Add(1)
-	go func() {
+
+	successTest := func(i int) {
 		defer wg.Done()
-		waiter, err := scheduler.ExecuteByConcurrency(strconv.Itoa(1), buildSuccessTasks())
+		waiter, err := scheduler.ExecuteByConcurrency(strconv.Itoa(i), buildSuccessTasks())
 		this.Assert().Nil(err)
 		waiter.Wait()
 		this.Assert().Nil(waiter.ResultErr())
-	}()
+	}
 
-	// fail
-	wg.Add(1)
-	go func() {
+	failTest := func(i int) {
 		defer wg.Done()
-		waiter, err := scheduler.ExecuteByOrder(strconv.Itoa(2), buildFailTasks())
+		waiter, err := scheduler.ExecuteByOrder(strconv.Itoa(i), buildFailTasks())
 		this.Assert().Nil(err)
 		waiter.Wait()
 		this.Assert().NotNil(waiter.ResultErr())
-	}()
+	}
 
-	// success
-	wg.Add(1)
-	go func() {
+	mixTest := func(i int) {
 		defer wg.Done()
-		waiter, err := scheduler.ExecuteByOrder(strconv.Itoa(3), buildSuccessTasks())
-		this.Assert().Nil(err)
-		waiter.Wait()
-		this.Assert().Nil(waiter.ResultErr())
-	}()
-
-	// fail
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		waiter, err := scheduler.ExecuteByConcurrency(strconv.Itoa(4), buildMixTasks())
+		waiter, err := scheduler.ExecuteByConcurrency(strconv.Itoa(i), buildMixTasks())
 		this.Assert().Nil(err)
 		waiter.Wait()
 		this.Assert().NotNil(waiter.ResultErr())
-	}()
+	}
 
-	// success
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		waiter, err := scheduler.ExecuteByConcurrency(strconv.Itoa(5), buildSuccessTasks())
-		this.Assert().Nil(err)
-		waiter.Wait()
-		this.Assert().NotEmpty(waiter.GetTaskIds())
-		this.Assert().Nil(waiter.ResultErr())
-		fmt.Println(waiter.GetTaskIds())
-	}()
+	tests := []func(i int){
+		successTest,
+		failTest,
+		successTest,
+		mixTest,
+		successTest,
+	}
+	for i := 1; i <= len(tests); i++ {
+		wg.Add(1)
+		go mixTest(i)
+	}
 	wg.Wait()
 }
 
 func (this *SchedulerTest) Test_ShouldBeAsync() {
-	batchId1 := strconv.Itoa(1)
 	startTime := time.Now()
-	waiter1, err := this.scheduler.ExecuteByOrder(batchId1, buildSuccessTasks())
+	waiter1, err := this.scheduler.ExecuteByOrder("1", buildSuccessTasks())
 	this.Assert().Nil(err)
-	batchId2 := strconv.Itoa(2)
-	waiter2, err := this.scheduler.ExecuteByConcurrency(batchId2, buildSuccessTasks())
+	waiter2, err := this.scheduler.ExecuteByConcurrency("2", buildSuccessTasks())
 	this.Assert().Nil(err)
 	this.Assert().Less(time.Now().Sub(startTime).Milliseconds(), int64(LongRunTime))
 	waiter1.Wait()
 	waiter2.Wait()
-	this.Assert().Equal(len(waiter1.GetTaskIds()), TaskNum)
+	this.Assert().Equal(len(waiter1.GetOrders()), TaskNum)
 	this.Assert().Nil(waiter1.ResultErr())
-	this.Assert().Equal(len(waiter2.GetTaskIds()), TaskNum)
+	this.Assert().Equal(len(waiter2.GetOrders()), TaskNum)
 	this.Assert().Nil(waiter2.ResultErr())
 }
 
-func (this *SchedulerTest) Test_ShouldCallTaskStopFunction() {
-	this.shouldCallSpecifyFunction(Stop, "1")
-}
-
-func (this *SchedulerTest) Test_ShouldCallTaskResumeFunction() {
-	this.shouldCallSpecifyFunction(Resume, "1")
-}
-
-func (this *SchedulerTest) Test_ShouldCallTaskCancelFunction() {
-	this.shouldCallSpecifyFunction(Cancel, "1")
-}
-
-func (this *SchedulerTest) Test_ShouldCallTaskPauseFunction() {
-	this.shouldCallSpecifyFunction(Pause, "1")
-}
-
-func (this *SchedulerTest) Test_ShouldCallTaskDeleteFunction() {
-	this.shouldCallSpecifyFunction(Delete, "1")
-}
-
-func (this *SchedulerTest) shouldCallSpecifyFunction(f func(group *TaskGroup, taskId string) (bool, error), id string) {
-	this.concurrence(func(i int) {
-		batchId := strconv.Itoa(i)
-		_, err := this.scheduler.ExecuteByConcurrency(batchId, buildLongTimeTasks())
+func (this *SchedulerTest) Test_ShouldCallSpecifyFunction() {
+	test := func(action func(group *TaskGroup, taskId string) (bool, error)) {
+		scheduler, _ := NewScheduler(100, nil)
+		batchId := "1"
+		_, err := scheduler.ExecuteByConcurrency(batchId, buildLongTimeTasks())
 		this.Assert().Nil(err)
-		ok, err := this.scheduler.Do(f, batchId, id)
+		ok, err := scheduler.Do(action, batchId, "1")
 		this.Assert().NotNil(err)
 		this.Assert().False(ok)
-	})
+	}
+	type action func(group *TaskGroup, taskId string) (bool, error)
+	actions := []action{Stop, Resume, Cancel, Pause, Delete}
+	for _, action := range actions {
+		test(action)
+	}
+}
+
+func (this *SchedulerTest) Test_ShouldReturnErrorIfTaskNotFind() {
+	batchId := "1"
+	_, err := this.scheduler.ExecuteByConcurrency(batchId, buildLongTimeTasks())
+	this.Assert().Nil(err)
+	ok, err := this.scheduler.Do(Stop, batchId, "10000000000000")
+	this.Assert().Equal(TaskNotFindError, err)
+	this.Assert().False(ok)
+}
+
+func (this *SchedulerTest) Test_ShouldReturnErrorIfTaskGroupNotExist() {
+	ok, err := this.scheduler.Do(Stop, "10000000000000", "1")
+	this.Assert().Equal(TaskNotFindError, err)
+	this.Assert().False(ok)
 }
 
 func (this *SchedulerTest) Test_ShouldNotPanicIfCallMultiActionAtTheSameTime() {
+	defer func() {
+		err := recover()
+		this.Assert().Nil(err)
+	}()
 	batchId := "1"
 	_, err := this.scheduler.ExecuteByConcurrency(batchId, buildLongTimeTasks())
 	this.Assert().Nil(err)
 	type action func(group *TaskGroup, taskId string) (bool, error)
-	actions := []action{
-		Stop,
-		Resume,
-		Cancel,
-		Pause,
-		Delete,
-	}
-	for i := 0; i < 10; i++ {
-		actions = append(actions, actions...)
+	var actions []action
+	for i := 0; i < 20; i++ {
+		actions = append(actions, []action{Stop, Resume, Cancel, Pause, Delete}...)
 	}
 	wg := sync.WaitGroup{}
 	wg.Add(len(actions))
@@ -511,244 +472,9 @@ func (this *SchedulerTest) Test_ShouldNotPanicIfCallMultiActionAtTheSameTime() {
 }
 
 func (this *SchedulerTest) Test_ShouldRecoverPanicFromDoFunc() {
-	defer func() {
-		err := recover()
-		this.Assert().Nil(err)
-	}()
 	batchId := "1"
-	_, err := this.scheduler.ExecuteByConcurrency(batchId, []*Task[TaskIface]{NewTask[TaskIface](&DoPanicTask{}, batchId, 1)})
+	_, err := this.scheduler.ExecuteByConcurrency(batchId, []*Task[TaskIface]{NewTask[TaskIface](&DoFuncPanicTask{}, batchId, 1)})
 	this.Assert().Nil(err)
-	this.scheduler.Do(Stop, batchId, "1")
-}
-
-func (this *SchedulerTest) Test_ShouldReturnErrorIfTaskNotFind() {
-	_, err := this.scheduler.ExecuteByConcurrency("1", buildLongTimeTasks())
-	this.Assert().Nil(err)
-
-	ok, err := this.scheduler.Do(Stop, "2", "1")
-	this.Assert().Equal(TaskNotFindError, err)
-	this.Assert().False(ok)
-
-	ok, err = this.scheduler.Do(Stop, "1", "10000000000000")
-	this.Assert().Equal(TaskNotFindError, err)
-	this.Assert().False(ok)
-}
-
-func Test_SchedulerTest(t *testing.T) {
-	suite.Run(t, new(SchedulerTest))
-}
-
-type SuccessTask struct {
-}
-
-func (this *SuccessTask) GetBizLogic() func() (bool, error) {
-	return this.success
-}
-
-func (this *SuccessTask) success() (bool, error) {
-	time.Sleep(time.Duration(NormalRunTime) * time.Millisecond)
-	return true, nil
-}
-
-func (this *SuccessTask) Stop() (bool, error) {
-	fmt.Println("success task Stop")
-	return true, nil
-}
-
-func (this *SuccessTask) Resume() (bool, error) {
-	fmt.Println("success task resume")
-	return true, nil
-}
-
-func (this *SuccessTask) Cancel() (bool, error) {
-	fmt.Println("success task cancel")
-	return true, nil
-}
-
-func (this *SuccessTask) Pause() (bool, error) {
-	fmt.Println("success task pause")
-	return false, FailError
-}
-
-func (this *SuccessTask) Delete() (bool, error) {
-	fmt.Println("success task delete")
-	return false, FailError
-}
-
-type FailTask struct {
-}
-
-func (this *FailTask) GetBizLogic() func() (bool, error) {
-	return this.fail
-}
-
-func (this *FailTask) fail() (bool, error) {
-	time.Sleep(time.Duration(NormalRunTime) * time.Millisecond)
-	return false, FailError
-}
-
-func (this *FailTask) Stop() (bool, error) {
-	fmt.Println("fail task Stop")
-	return false, FailError
-}
-
-func (this *FailTask) Resume() (bool, error) {
-	fmt.Println("fail task resume")
-	return false, FailError
-}
-
-func (this *FailTask) Cancel() (bool, error) {
-	fmt.Println("fail task cancel")
-	return false, FailError
-}
-
-func (this *FailTask) Pause() (bool, error) {
-	fmt.Println("fail task pause")
-	return false, FailError
-}
-
-func (this *FailTask) Delete() (bool, error) {
-	fmt.Println("fail task delete")
-	return false, FailError
-}
-
-type LongTimeTask struct {
-	properties map[string]string
-}
-
-func (this *LongTimeTask) GetBizLogic() func() (bool, error) {
-	return this.longTime
-}
-
-func (this *LongTimeTask) longTime() (bool, error) {
-	time.Sleep(time.Duration(LongRunTime) * time.Millisecond)
-	return true, nil
-}
-
-func (this *LongTimeTask) Stop() (bool, error) {
-	fmt.Println("long time task Stop")
-	this.properties["property"] = "stop"
-	return false, FailError
-}
-
-func (this *LongTimeTask) Resume() (bool, error) {
-	fmt.Println("long time task resume")
-	this.properties["property"] = "resume"
-	return false, FailError
-}
-
-func (this *LongTimeTask) Cancel() (bool, error) {
-	fmt.Println("long time task cancel")
-	this.properties["property"] = "cancel"
-	return false, FailError
-}
-
-func (this *LongTimeTask) Pause() (bool, error) {
-	fmt.Println("long task pause")
-	this.properties["property"] = "pause"
-	return false, FailError
-}
-
-func (this *LongTimeTask) Delete() (bool, error) {
-	fmt.Println("long task delete")
-	this.properties["property"] = "delete"
-	return false, FailError
-}
-
-type PanicTask struct {
-}
-
-func (this *PanicTask) GetBizLogic() func() (bool, error) {
-	return this.panic
-}
-
-func (this *PanicTask) panic() (bool, error) {
-	panic("task notOk")
-}
-
-func (this *PanicTask) Stop() (bool, error) {
-	panic("task notOk")
-}
-
-func (this *PanicTask) Resume() (bool, error) {
-	panic("task notOk")
-}
-
-func (this *PanicTask) Cancel() (bool, error) {
-	panic("task notOk")
-}
-
-func (this *PanicTask) Pause() (bool, error) {
-	panic("task notOk")
-}
-
-func (this *PanicTask) Delete() (bool, error) {
-	panic("task notOk")
-}
-
-type FalseTask struct {
-}
-
-func (this *FalseTask) GetBizLogic() func() (bool, error) {
-	return this.notOk
-}
-
-func (this *FalseTask) notOk() (bool, error) {
-	return false, nil
-}
-
-func (this *FalseTask) Stop() (bool, error) {
-	fmt.Println("false task Stop")
-	return false, FailError
-}
-
-func (this *FalseTask) Resume() (bool, error) {
-	fmt.Println("false task resume")
-	return false, FailError
-}
-
-func (this *FalseTask) Cancel() (bool, error) {
-	fmt.Println("false task cancel")
-	return false, FailError
-}
-
-func (this *FalseTask) Pause() (bool, error) {
-	fmt.Println("false task pause")
-	return false, FailError
-}
-
-func (this *FalseTask) Delete() (bool, error) {
-	fmt.Println("false task delete")
-	return false, FailError
-}
-
-type DoPanicTask struct {
-}
-
-func (this *DoPanicTask) GetBizLogic() func() (bool, error) {
-	return this.ok
-}
-
-func (this *DoPanicTask) ok() (bool, error) {
-	return true, nil
-}
-
-func (this *DoPanicTask) Stop() (bool, error) {
-	panic("task panic")
-}
-
-func (this *DoPanicTask) Resume() (bool, error) {
-	panic("task panic")
-}
-
-func (this *DoPanicTask) Cancel() (bool, error) {
-	panic("task panic")
-}
-
-func (this *DoPanicTask) Pause() (bool, error) {
-	panic("task panic")
-}
-
-func (this *DoPanicTask) Delete() (bool, error) {
-	panic("task panic")
+	_, err = this.scheduler.Do(Stop, batchId, "1")
+	this.Assert().NotNil(err)
 }

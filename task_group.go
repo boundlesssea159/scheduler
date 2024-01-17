@@ -19,8 +19,8 @@ func NewTaskGroup(id string, tasks Tasks, scheduler *Scheduler) *TaskGroup {
 		scheduler: scheduler,
 		tasks:     tasks,
 		waiter: &Waiter{
-			ok:      make(chan struct{}),
-			taskIds: make([]string, 0, len(tasks)),
+			ok:     make(chan struct{}),
+			orders: make([]int, 0, len(tasks)),
 		},
 	}
 }
@@ -37,8 +37,7 @@ func (this *TaskGroup) runByOrder() {
 			if Err.Load() != nil {
 				break
 			}
-			err := this.scheduler.occupyCapacity()
-			if err != nil {
+			if err := this.scheduler.occupyCapacity(); err != nil {
 				Err.Store(err)
 				break
 			}
@@ -110,11 +109,11 @@ func (this *TaskGroup) getWaiter() *Waiter {
 	return this.waiter
 }
 
-func (this *TaskGroup) recordId(id string) {
-	this.waiter.appendId(id)
+func (this *TaskGroup) recordOrder(order int) {
+	this.waiter.appendOrder(order)
 }
 
-func (this *TaskGroup) do(id string, do func(task *Task[TaskIface]) (bool, error)) (bool, error) {
+func (this *TaskGroup) do(do func(task *Task[TaskIface]) (bool, error), id string) (bool, error) {
 	for _, task := range this.tasks {
 		if task.id == id {
 			return do(task)

@@ -92,24 +92,20 @@ func (this *Scheduler) releaseCapacity() {
 }
 
 func (this *Scheduler) ExecuteByOrder(batchId string, tasks Tasks) (*Waiter, error) {
-	return this.execute(func(taskGroup *TaskGroup) func() {
-		return taskGroup.runByOrder
-	}, batchId, tasks)
+	return this.execute(func(taskGroup *TaskGroup) { taskGroup.runByOrder() }, batchId, tasks)
 }
 
 func (this *Scheduler) ExecuteByConcurrency(batchId string, tasks Tasks) (*Waiter, error) {
-	return this.execute(func(taskGroup *TaskGroup) func() {
-		return taskGroup.runByConcurrency
-	}, batchId, tasks)
+	return this.execute(func(taskGroup *TaskGroup) { taskGroup.runByConcurrency() }, batchId, tasks)
 }
 
-func (this *Scheduler) execute(executeFunc func(taskGroup *TaskGroup) func(), batchId string, tasks Tasks) (*Waiter, error) {
+func (this *Scheduler) execute(do func(taskGroup *TaskGroup), batchId string, tasks Tasks) (*Waiter, error) {
 	if err := this.check(batchId, tasks); err != nil {
 		return nil, err
 	}
 	taskGroup := NewTaskGroup(batchId, tasks, this)
 	this.tasks.Store(batchId, taskGroup)
-	executeFunc(taskGroup)()
+	do(taskGroup)
 	return taskGroup.getWaiter(), nil
 }
 
@@ -123,21 +119,21 @@ func (this *Scheduler) Do(do func(group *TaskGroup, taskId string) (bool, error)
 }
 
 func Stop(group *TaskGroup, taskId string) (bool, error) {
-	return group.do(taskId, stop)
+	return group.do(stop, taskId)
 }
 
 func Resume(group *TaskGroup, taskId string) (bool, error) {
-	return group.do(taskId, resume)
+	return group.do(resume, taskId)
 }
 
 func Cancel(group *TaskGroup, taskId string) (bool, error) {
-	return group.do(taskId, cancel)
+	return group.do(cancel, taskId)
 }
 
 func Pause(group *TaskGroup, taskId string) (bool, error) {
-	return group.do(taskId, pause)
+	return group.do(pause, taskId)
 }
 
 func Delete(group *TaskGroup, taskId string) (bool, error) {
-	return group.do(taskId, delete)
+	return group.do(delete, taskId)
 }
