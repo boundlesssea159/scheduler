@@ -52,7 +52,7 @@ func (this *Task[T]) setTaskGroup(taskGroup *TaskGroup) {
 func (this *Task[T]) run() (ok bool, err error) {
 	defer func() {
 		if rv := recover(); rv != nil {
-			err = errors.New(fmt.Sprintf("task notOk: %+v", rv))
+			err = errors.New(fmt.Sprintf("task GetBizLogic() panic: %+v", rv))
 			ok = false
 		}
 	}()
@@ -64,7 +64,13 @@ func (this *Task[T]) run() (ok bool, err error) {
 	return ok, err
 }
 
-func (this *Task[T]) do(do func() (bool, error)) (bool, error) {
+func (this *Task[T]) do(do func() (bool, error)) (ok bool, err error) {
+	defer func() {
+		if rv := recover(); rv != nil {
+			ok = false
+			err = errors.New(fmt.Sprintf("task do() panic: %+v", rv))
+		}
+	}()
 	this.mu.Lock()
 	defer this.mu.Unlock()
 	return do()

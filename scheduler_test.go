@@ -510,7 +510,16 @@ func (this *SchedulerTest) Test_ShouldNotPanicIfCallMultiActionAtTheSameTime() {
 	wg.Wait()
 }
 
-// do func should recover panic
+func (this *SchedulerTest) Test_ShouldRecoverPanicFromDoFunc() {
+	defer func() {
+		err := recover()
+		this.Assert().Nil(err)
+	}()
+	batchId := "1"
+	_, err := this.scheduler.ExecuteByConcurrency(batchId, []*Task[TaskIface]{NewTask[TaskIface](&DoPanicTask{}, batchId, 1)})
+	this.Assert().Nil(err)
+	this.scheduler.Do(Stop, batchId, "1")
+}
 
 func (this *SchedulerTest) Test_ShouldReturnErrorIfTaskNotFind() {
 	_, err := this.scheduler.ExecuteByConcurrency("1", buildLongTimeTasks())
@@ -655,32 +664,26 @@ func (this *PanicTask) GetBizLogic() func() (bool, error) {
 
 func (this *PanicTask) panic() (bool, error) {
 	panic("task notOk")
-	return false, nil
 }
 
 func (this *PanicTask) Stop() (bool, error) {
-	fmt.Println("panic task Stop")
-	return false, FailError
+	panic("task notOk")
 }
 
 func (this *PanicTask) Resume() (bool, error) {
-	fmt.Println("panic task resume")
-	return false, FailError
+	panic("task notOk")
 }
 
 func (this *PanicTask) Cancel() (bool, error) {
-	fmt.Println("panic task cancel")
-	return false, FailError
+	panic("task notOk")
 }
 
 func (this *PanicTask) Pause() (bool, error) {
-	fmt.Println("panic task pause")
-	return false, FailError
+	panic("task notOk")
 }
 
 func (this *PanicTask) Delete() (bool, error) {
-	fmt.Println("panic task delete")
-	return false, FailError
+	panic("task notOk")
 }
 
 type FalseTask struct {
@@ -717,4 +720,35 @@ func (this *FalseTask) Pause() (bool, error) {
 func (this *FalseTask) Delete() (bool, error) {
 	fmt.Println("false task delete")
 	return false, FailError
+}
+
+type DoPanicTask struct {
+}
+
+func (this *DoPanicTask) GetBizLogic() func() (bool, error) {
+	return this.ok
+}
+
+func (this *DoPanicTask) ok() (bool, error) {
+	return true, nil
+}
+
+func (this *DoPanicTask) Stop() (bool, error) {
+	panic("task panic")
+}
+
+func (this *DoPanicTask) Resume() (bool, error) {
+	panic("task panic")
+}
+
+func (this *DoPanicTask) Cancel() (bool, error) {
+	panic("task panic")
+}
+
+func (this *DoPanicTask) Pause() (bool, error) {
+	panic("task panic")
+}
+
+func (this *DoPanicTask) Delete() (bool, error) {
+	panic("task panic")
 }
