@@ -7,7 +7,6 @@ import (
 
 type Waiter struct {
 	ok     chan struct{}
-	closed int32
 	orders []int
 	err    atomic.Value
 	mu     sync.RWMutex
