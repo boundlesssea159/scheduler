@@ -13,7 +13,7 @@ type TaskGroup struct {
 	waiter    *Waiter
 }
 
-func NewTaskGroup(id string, tasks Tasks, scheduler *Scheduler) *TaskGroup {
+func newTaskGroup(id string, tasks Tasks, scheduler *Scheduler) *TaskGroup {
 	return &TaskGroup{
 		id:        id,
 		scheduler: scheduler,

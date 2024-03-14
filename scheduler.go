@@ -103,7 +103,7 @@ func (this *Scheduler) execute(do func(taskGroup *TaskGroup), batchId string, ta
 	if err := this.check(batchId, tasks); err != nil {
 		return nil, err
 	}
-	taskGroup := NewTaskGroup(batchId, tasks, this)
+	taskGroup := newTaskGroup(batchId, tasks, this)
 	this.tasks.Store(batchId, taskGroup)
 	do(taskGroup)
 	return taskGroup.getWaiter(), nil
