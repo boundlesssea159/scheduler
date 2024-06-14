@@ -31,7 +31,7 @@ waiter2, err := scheduler.ExecuteByConcurrency("1", []*Task[TaskIface]{
 // as the sub-tasks in there
 })
 if err!=nil{
-return
+    return
 }
 waiter2.Wait() // wait result
 ```
