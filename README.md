@@ -1,12 +1,9 @@
 # Scheduler-Task Manager
-___
 Scheduler, the sub-task manager, provide the ability to manage the execution sequence of sub-task which are split from a main task and control the whole concurrency  
 ## Features
-___
 * Provide different ways to execute sub-task
 * Control the whole concurrency by user self
 ## Usages
-___
 ```go
 // first parameter: means the maximum concurrency
 // second parameter: the configuration of Limiter 
