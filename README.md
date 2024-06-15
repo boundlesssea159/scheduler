@@ -27,7 +27,7 @@ if err!=nil{
 waiter1.Wait() // wait result
 
 // CASE 2 : execute by concurrency
-waiter2, err := scheduler.ExecuteByConcurrency("1", []*Task[TaskIface]{
+waiter2, err := scheduler.ExecuteByConcurrency("2", []*Task[TaskIface]{
 // as the sub-tasks in there
 })
 if err!=nil{
