@@ -24,14 +24,15 @@ waiter1, err := scheduler.ExecuteByOrder("1", []*Task[TaskIface]{
 if err!=nil{
 	return
 }
-waiter1.Wait() // wait result
+waiter1.Wait() // wait done
+fmt.Println(waiter1.GetOrders()) // print the finishing order of task 
 
 // CASE 2 : execute by concurrency
 waiter2, err := scheduler.ExecuteByConcurrency("2", []*Task[TaskIface]{
-// as the sub-tasks in there
 })
 if err!=nil{
     return
 }
-waiter2.Wait() // wait result
+waiter2.Wait()
+fmt.Println(waiter2.GetOrders())
 ```
