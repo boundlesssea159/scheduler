@@ -1,3 +1,4 @@
+[![codecov](https://codecov.io/github/boundlesssea159/scheduler/graph/badge.svg?token=186QDXOZV5)](https://codecov.io/github/boundlesssea159/scheduler)
 # Scheduler-Task Manager
 Scheduler, the sub-task manager, provide the ability to manage the execution sequence of sub-task which are split from a main task and control the whole concurrency  
 ## Features
