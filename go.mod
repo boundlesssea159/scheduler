@@ -1,4 +1,4 @@
-module scheduler
+module github.com/boundlesssea159/scheduler
 
 go 1.20
 
